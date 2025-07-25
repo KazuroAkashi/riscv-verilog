@@ -312,17 +312,15 @@ module main(input clk);
             7'b1101111: begin
                 // JAL (UJ-type)
                 // $display("JAL: Trying to go to %h, and will return to %h", pc + uj_imm, pc);
-                if (uj_rd != 5'b00000) begin
-                    regfile[uj_rd] <= pc; // This is the next address since inst would be assigned to memory[pc >> 2] in this clock cycle
-                    inst <= memory[(pc-4 + uj_imm) >> 2];
-                    pc <= (pc + uj_imm);
-                end
+                if (uj_rd != 5'b00000) regfile[uj_rd] <= pc; // This is the next address since inst would be assigned to memory[pc >> 2] in this clock cycle
+                inst <= memory[(pc-4 + uj_imm) >> 2];
+                pc <= (pc + uj_imm);
             end
             7'b1100111: begin
                 // JALR (I-type)
                 // $display("JALR: Trying to go to %h, and will return to %h", regfile[i_rs1] + i_imm, pc);
                 if (i_funct3 == 3'b000) begin
-                    if (i_rd == 5'b00000) regfile[i_rd] <= pc; // This is the next address since inst would be assigned to memory[pc >> 2] in this clock cycle
+                    if (i_rd != 5'b00000) regfile[i_rd] <= pc; // This is the next address since inst would be assigned to memory[pc >> 2] in this clock cycle
                     inst <= memory[((regfile[i_rs1] + i_imm) & ~32'h1) >> 2];
                     pc <= ((regfile[i_rs1] + i_imm)  & ~32'h1) + 4;
                 end

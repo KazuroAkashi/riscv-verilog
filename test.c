@@ -10,14 +10,17 @@ void print_text(char *text) {
         text++;
     }
 }
-
+int factorial(int n) {
+    if (n <= 1) return 1;
+    return n * factorial(n-1);
+}
 int main() {
-    print_text("Hello world!");
+    // print_text("Hello world!");
 
-    int a = 5;
-    int b = 7;
-    int c = 6;
-    int d = (a+b)*(c+1);
+    // int a = 5;
+    // int b = 7;
+    // int c = 6;
+    // int d = (a+b)*(c+1);
 
-    *EXIT_ADDR = d;
+    *EXIT_ADDR = factorial(5);
 }
