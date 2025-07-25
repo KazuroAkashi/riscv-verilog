@@ -4,9 +4,12 @@
 // Magic address for exit
 #define EXIT_ADDR ((volatile char *)0xABCD0000)
 
-int main() {
+void print_text(char *text) {
     *PRINT_ADDR = 'A';
-    *PRINT_ADDR = 'b';
+}
+
+int main() {
+    print_text("Hello world!\0");
 
     int a = 5;
     int b = 7;

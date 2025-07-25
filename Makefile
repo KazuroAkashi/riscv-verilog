@@ -21,3 +21,10 @@ OBJCOPYFLAGS = -O binary -j .text --pad-to=$(MEMORY_SIZE)
 	@echo "Converting $< to $@..."
 	@hexdump -v -e '1/4 "%08x " "\n"' $< > $@
 	@rm -f $*.bin $*.elf
+
+%.elf.hex: %.elf
+	@echo "Converting $< to $@..."
+	@dd if=/dev/zero of=$*.bin ibs=1 count=65536
+	@dd if=$< of=$*.bin conv=notrunc
+	@hexdump -v -e '1/1 "%02x " "\n"' $*.bin > $@
+	@rm -f $*.bin $*.elf

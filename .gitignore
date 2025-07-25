@@ -3,4 +3,3 @@ a.out
 *.dis
 *.hex
 *.bin
-link.ld
