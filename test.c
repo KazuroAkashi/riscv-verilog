@@ -5,11 +5,14 @@
 #define EXIT_ADDR ((volatile char *)0xABCD0000)
 
 void print_text(char *text) {
-    *PRINT_ADDR = 'A';
+    while (*text != '\0') {
+        *PRINT_ADDR = *text;
+        text++;
+    }
 }
 
 int main() {
-    print_text("Hello world!\0");
+    print_text("Hello world!");
 
     int a = 5;
     int b = 7;

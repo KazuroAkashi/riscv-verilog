@@ -52,8 +52,8 @@ module main(input clk);
     reg [31:0] elf_sections_start;
     reg [31:0] elf_text_start = 32'b0;
     reg [31:0] elf_text_size = 32'b0;
-    reg [31:0] elf_data_start = 32'b0;
-    reg [31:0] elf_data_size = 32'b0;
+    reg [31:0] elf_rodata_start = 32'b0;
+    reg [31:0] elf_rodata_size = 32'b0;
 
     reg [7:0] elf_data [65535:0];
     integer i;
@@ -117,12 +117,17 @@ module main(input clk);
         // $display("Entry point: %h", entrypoint);
 
         elf_sections_start = { elf_data[8'h23], elf_data[8'h22], elf_data[8'h21], elf_data[8'h20] };
-        for (i = 0; i < 16 && elf_text_start == 32'b0; i = i + 1) begin
+        for (i = 0; i < 16 && (elf_text_start == 32'b0 || elf_rodata_start == 32'b0); i = i + 1) begin
             if ({elf_data[elf_sections_start+8'h28*i+4+3], elf_data[elf_sections_start+8'h28*i+4+2], elf_data[elf_sections_start+8'h28*i+4+1], elf_data[elf_sections_start+8'h28*i+4]} == 8'h01) begin
                 if ({elf_data[elf_sections_start+8'h28*i+8+3], elf_data[elf_sections_start+8'h28*i+8+2], elf_data[elf_sections_start+8'h28*i+8+1], elf_data[elf_sections_start+8'h28*i+8]} == 8'h06) begin
                     elf_text_start = {elf_data[elf_sections_start+8'h28*i+16+3], elf_data[elf_sections_start+8'h28*i+16+2], elf_data[elf_sections_start+8'h28*i+16+1], elf_data[elf_sections_start+8'h28*i+16]};
                     elf_text_size = {elf_data[elf_sections_start+8'h28*i+20+3], elf_data[elf_sections_start+8'h28*i+20+2], elf_data[elf_sections_start+8'h28*i+20+1], elf_data[elf_sections_start+8'h28*i+20]};
                 end
+            end
+            // Assume .rodata follows right after .text for now
+            if (elf_text_start != 0) begin
+                elf_rodata_start = {elf_data[elf_sections_start+8'h28*i+16+3], elf_data[elf_sections_start+8'h28*i+16+2], elf_data[elf_sections_start+8'h28*i+16+1], elf_data[elf_sections_start+8'h28*i+16]};
+                elf_rodata_size = {elf_data[elf_sections_start+8'h28*i+20+3], elf_data[elf_sections_start+8'h28*i+20+2], elf_data[elf_sections_start+8'h28*i+20+1], elf_data[elf_sections_start+8'h28*i+20]};
             end
         end
 
@@ -137,6 +142,10 @@ module main(input clk);
         for (i = 0; i < elf_text_size; i = i + 4) begin
             memory[i >> 2] = { elf_data[elf_text_start + i + 3], elf_data[elf_text_start + i + 2], elf_data[elf_text_start + i + 1], elf_data[elf_text_start + i] };
         end
+        for (; i < elf_text_size + elf_rodata_size; i = i + 4) begin
+            memory[i >> 2] = { elf_data[elf_rodata_start + i + 3], elf_data[elf_rodata_start + i + 2], elf_data[elf_rodata_start + i + 1], elf_data[elf_rodata_start + i] };
+        end
+
 
         inst = memory[entrypoint >> 2];
         pc = entrypoint + 4;
@@ -157,25 +166,26 @@ module main(input clk);
 
         // #1;
         // $display("pc = %h | inst = %h", pc, inst);
+        // $display("%h", regfile[15]);
 
         // Decoder
         case(opcode)
             7'b0000011: begin
                 // LOAD (I-type)
-                // $display("Loading %h from %h", i_mem_hw, i_mem_addr_full);
+                // $display("Loading %h from %h (%h)", memory[i_mem_addr], i_mem_addr_full, i_mem_addr);
                 if (i_rd != 5'b00000) begin
                     case (i_funct3)
-                        3'b000: regfile[i_rd] <= { {24{i_mem_byte[7]}}, i_mem_byte };
-                        3'b001: regfile[i_rd] <= { {16{i_mem_hw[15]}}, i_mem_hw };
-                        3'b010: regfile[i_rd] <= memory[i_mem_addr];
-                        3'b100: regfile[i_rd] <= { {24{1'b0}}, i_mem_byte };
-                        3'b101: regfile[i_rd] <= { {16{1'b0}}, i_mem_hw };
+                        3'b000: regfile[i_rd] <= { {24{i_mem_byte[7]}}, i_mem_byte }; // LB 
+                        3'b001: regfile[i_rd] <= { {16{i_mem_hw[15]}}, i_mem_hw }; // LH
+                        3'b010: regfile[i_rd] <= memory[i_mem_addr]; // LW
+                        3'b100: regfile[i_rd] <= { {24{1'b0}}, i_mem_byte }; // LBU
+                        3'b101: regfile[i_rd] <= { {16{1'b0}}, i_mem_hw }; // LHU
                     endcase
                 end
             end
             7'b0100011: begin
                 // STORE (S-type)
-                // $display("Storing %h to %h", s_rs2_data, s_mem_addr);
+                // $display("Storing %h to %h (%h)", s_rs2_data, s_mem_addr_full, s_mem_addr);
                 case (s_mem_addr_full)
                     32'hFFFF0000: $write("%c", s_rs2_data[7:0]);  // Print a character
                     32'hABCD0000: begin 
@@ -185,7 +195,7 @@ module main(input clk);
                     end
                     default: begin
                         case (s_funct3)
-                            3'b000: begin 
+                            3'b000: begin // SB
                                 case (s_mem_addr_full[1:0]) 
                                     2'b00: memory[s_mem_addr][7:0] <= s_rs2_data_byte;
                                     2'b01: memory[s_mem_addr][15:8] <= s_rs2_data_byte;
@@ -193,13 +203,13 @@ module main(input clk);
                                     2'b11: memory[s_mem_addr][31:24] <= s_rs2_data_byte;
                                 endcase
                             end
-                            3'b001: begin 
+                            3'b001: begin // SH
                                 case (s_mem_addr_full[1:0]) 
                                     2'b00: memory[s_mem_addr][15:0] <= s_rs2_data_hw;
                                     2'b10: memory[s_mem_addr][31:16] <= s_rs2_data_hw;
                                 endcase
                             end
-                            3'b010: memory[s_mem_addr] <= s_rs2_data;
+                            3'b010: memory[s_mem_addr] <= s_rs2_data; // SW
                         endcase
                     end
                 endcase
@@ -261,40 +271,40 @@ module main(input clk);
                 // BRANCH (SB-type)
                 // $display("Branch test: comparing %h and %h\nTrying to go to %h", regfile[b_rs1], regfile[b_rs2], pc + b_imm);
                 case (b_funct3)
-                    3'b000: begin
+                    3'b000: begin // BEQ
                         if (regfile[b_rs1] == regfile[b_rs2]) begin
-                            inst <= memory[(pc + b_imm) >> 2];
-                            pc <= (pc + b_imm) + 4;
+                            inst <= memory[(pc + b_imm -4) >> 2];
+                            pc <= (pc + b_imm);
                         end
                     end
-                    3'b001: begin
+                    3'b001: begin // BNE
                         if (regfile[b_rs1] != regfile[b_rs2]) begin
-                            inst <= memory[(pc + b_imm) >> 2];
-                            pc <= (pc + b_imm) + 4;
+                            inst <= memory[(pc + b_imm - 4) >> 2];
+                            pc <= (pc + b_imm);
                         end
                     end
-                    3'b100: begin
+                    3'b100: begin // BLT
                         if ($signed(regfile[b_rs1]) < $signed(regfile[b_rs2])) begin
-                            inst <= memory[(pc + b_imm) >> 2];
-                            pc <= (pc + b_imm) + 4;
+                            inst <= memory[(pc + b_imm - 4) >> 2];
+                            pc <= (pc + b_imm);
                         end
                     end
-                    3'b101: begin
+                    3'b101: begin // BGE
                         if ($signed(regfile[b_rs1]) >= $signed(regfile[b_rs2])) begin
-                            inst <= memory[(pc + b_imm) >> 2];
-                            pc <= (pc + b_imm) + 4;
+                            inst <= memory[(pc + b_imm - 4) >> 2];
+                            pc <= (pc + b_imm);
                         end
                     end
-                    3'b110: begin
+                    3'b110: begin // BLTU
                         if (regfile[b_rs1] < regfile[b_rs2]) begin
-                            inst <= memory[(pc + b_imm) >> 2];
-                            pc <= (pc + b_imm) + 4;
+                            inst <= memory[(pc + b_imm - 4) >> 2];
+                            pc <= (pc + b_imm);
                         end
                     end
-                    3'b111: begin
+                    3'b111: begin // BGEU
                         if (regfile[b_rs1] >= regfile[b_rs2]) begin
-                            inst <= memory[(pc + b_imm) >> 2];
-                            pc <= (pc + b_imm) + 4;
+                            inst <= memory[(pc + b_imm - 4) >> 2];
+                            pc <= (pc + b_imm);
                         end
                     end
                 endcase
@@ -338,7 +348,7 @@ module test;
 
     initial begin
         #1000;
-        $finish;
+        // $finish;
     end
     
 endmodule
