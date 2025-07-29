@@ -396,9 +396,9 @@ module main(input clk);
                 // STORE (S-type)
                 // $display("Initiating store | addr: %h | data: %h", s_imm + read_register(s_rs1), read_register(s_rs2));
                 case (s_imm + read_register(s_rs1))
-                    PRINT_ADDR: begin
-                        $write("%h", read_register(s_rs2));
-                    end
+                    // PRINT_ADDR: begin
+                    //     $write("%h", read_register(s_rs2));
+                    // end
                     default: begin
                         case (s_funct3)
                             3'b000, // SB

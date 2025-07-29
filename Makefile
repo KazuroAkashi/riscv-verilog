@@ -5,7 +5,7 @@ OBJCOPY = riscv64-elf-objcopy
 CFLAGS = -march=rv32i -mabi=ilp32 -T link.ld
 
 # MEMORY_SIZE = 4096
-ELF_SIZE = 1048576 # 1 MB
+ELF_SIZE = 1048576 # 1 MB (Must match with the definiton inside main.v)
 
 # OBJCOPYFLAGS = -O binary -j .text --pad-to=$(MEMORY_SIZE)
 
