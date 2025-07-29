@@ -1,36 +1,20 @@
 // Magic address for printing
-#define PRINT_ADDR ((volatile char *)0xFFFF0000)
+#define PRINT_ADDR ((volatile char*)0xFFFFFF00)
 
-// Magic address for exit
-#define EXIT_ADDR ((volatile char *)0xABCD0000)
+#include <stdio.h>
+#include <stdlib.h>
+#include <reent.h>
 
-// Standard library memset function is needed for arrays
-void* memset(void* ptr, int value, int num) {
-    unsigned char* p = (unsigned char*)ptr;
-    for (int i = 0; i < num; i++) {
-        p[i] = (unsigned char)value;
-    }
-    return ptr;
+int _swbuf_r(struct _reent *r, int c, FILE *stream) {
+    exit(1);
+    *PRINT_ADDR = c;
+    return c;  // Return the written character on success
 }
-/////////////////////////////////////////////////////
-
 
 void print_text(char *text) {
-    while (*text != '\0') {
+    while (*text) {
         *PRINT_ADDR = *text;
         text++;
-    }
-}
-
-void print_int(int n) {
-    char buffer[10];
-    int i = 0;
-    do {
-        buffer[i++] = '0' + (n % 10);
-        n /= 10;
-    } while (n > 0);
-    for (int j = i-1; j >= 0; j--) {
-        *PRINT_ADDR = buffer[j];
     }
 }
 
@@ -67,13 +51,24 @@ int main() {
 
     // *EXIT_ADDR = fibonacci(10);
 
-    struct Point p = {61, 34};
-    move_point(&p, 5, 3);
+    // struct Point p = {61, 34};
+    // move_point(&p, 5, 3);
 
-    print_int(p.x);
-    print_text(", ");
-    print_int(p.y);
-    print_text("\n");
+    // print_int(p.x);
+    // print_text(", ");
+    // print_int(p.y);
+    // print_text("\n");
 
-    *EXIT_ADDR = 0;
+    // exit(0);
+
+    // print_text("Hello world!\n");
+    // fclose(stdout);
+    // stdout = fdopen(1, "w");
+    // setvbuf(stdout, NULL, _IONBF, 0); // disable buffering
+    // putchar('c');
+    printf("%d test\n", 5);
+    // fflush(stdout);
+
+    // write(1, "test", 18);
+    return 0;
 }

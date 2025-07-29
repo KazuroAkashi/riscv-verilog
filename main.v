@@ -1,7 +1,13 @@
 module main(input clk);
 
-    parameter MEMORY_LEN = 1024;
+    parameter MEMORY_LEN = 65536;
     parameter MEMORY_BITS = $clog2(MEMORY_LEN);
+
+    parameter ELF_SIZE = 1048576; // 1 MB
+
+    parameter TERMINATE_PROGRAM_ADDR = 32'hFFFFF000;
+
+    parameter PRINT_ADDR = 32'hFFFFFF00;
 
     reg [31:0] memory [MEMORY_LEN-1:0];
     reg [31:0] regfile [31:0];
@@ -52,15 +58,25 @@ module main(input clk);
     reg [31:0] elf_sections_start;
     reg [31:0] elf_text_start = 32'b0;
     reg [31:0] elf_text_size = 32'b0;
-    reg [31:0] elf_rodata_start = 32'b0;
-    reg [31:0] elf_rodata_size = 32'b0;
+    reg [31:0] elf_bss_start = 32'b0;
 
-    reg [7:0] elf_data [65535:0];
-    integer i;
+    reg [15:0] elf_section_count = 16'b0;
+    reg [15:0] elf_shstrtab_index = 16'b0;
+
+    reg [31:0] elf_prev_section_start = 32'b0;
+    reg [31:0] elf_current_section_start = 32'b0;
+    wire [31:0] elf_current_section_type = { elf_data[elf_current_section_start + 8'h04 + 3], elf_data[elf_current_section_start + 8'h04 + 2], elf_data[elf_current_section_start + 8'h04 + 1], elf_data[elf_current_section_start + 8'h04] };
+    wire [31:0] elf_current_section_name_offset = { elf_data[elf_current_section_start + 3], elf_data[elf_current_section_start + 2], elf_data[elf_current_section_start + 1], elf_data[elf_current_section_start] };
+    wire [31:0] elf_current_section_content_start = { elf_data[elf_current_section_start + 8'h10 + 3], elf_data[elf_current_section_start + 8'h10 + 2], elf_data[elf_current_section_start + 8'h10 + 1], elf_data[elf_current_section_start + 8'h10] };
+
+    reg [31:0] elf_shstrtab_start = 32'b0;
+
+    reg [7:0] elf_data [ELF_SIZE-1:0];
+    integer i, j;
     // ELF Parsing
     initial begin
 
-        $readmemh("test.elf.hex", elf_data, 0, 65535);
+        $readmemh("test.elf.hex", elf_data, 0, ELF_SIZE-1);
 
         // ELF header
         if (elf_data[0] != 8'h7f || elf_data[1] != 8'h45 || elf_data[2] != 8'h4c || elf_data[3] != 8'h46) begin
@@ -118,17 +134,25 @@ module main(input clk);
         // $display("Entry point: %h", entrypoint);
 
         elf_sections_start = { elf_data[8'h23], elf_data[8'h22], elf_data[8'h21], elf_data[8'h20] };
-        for (i = 0; i < 16 && (elf_text_start == 32'b0 || elf_rodata_start == 32'b0); i = i + 1) begin
-            if ({elf_data[elf_sections_start+8'h28*i+4+3], elf_data[elf_sections_start+8'h28*i+4+2], elf_data[elf_sections_start+8'h28*i+4+1], elf_data[elf_sections_start+8'h28*i+4]} == 8'h01) begin
-                if ({elf_data[elf_sections_start+8'h28*i+8+3], elf_data[elf_sections_start+8'h28*i+8+2], elf_data[elf_sections_start+8'h28*i+8+1], elf_data[elf_sections_start+8'h28*i+8]} == 8'h06) begin
-                    elf_text_start = {elf_data[elf_sections_start+8'h28*i+16+3], elf_data[elf_sections_start+8'h28*i+16+2], elf_data[elf_sections_start+8'h28*i+16+1], elf_data[elf_sections_start+8'h28*i+16]};
-                    elf_text_size = {elf_data[elf_sections_start+8'h28*i+20+3], elf_data[elf_sections_start+8'h28*i+20+2], elf_data[elf_sections_start+8'h28*i+20+1], elf_data[elf_sections_start+8'h28*i+20]};
-                end
+        elf_section_count = { elf_data[8'h31], elf_data[8'h30] };
+        elf_shstrtab_index = { elf_data[8'h33], elf_data[8'h32] };
+        elf_shstrtab_start = { elf_data[elf_sections_start + elf_shstrtab_index*8'h28 + 8'h10 + 3], elf_data[elf_sections_start + elf_shstrtab_index*8'h28 + 8'h10 + 2], elf_data[elf_sections_start + elf_shstrtab_index*8'h28 + 8'h10 + 1], elf_data[elf_sections_start + elf_shstrtab_index*8'h28 + 8'h10] };
+
+        // Skip the first null section
+        for (i = 1; i < elf_section_count && elf_bss_start == 0; i = i + 1) begin
+            elf_current_section_start = elf_sections_start + i*8'h28;
+            if (elf_text_start == 0 && ".text" == {elf_data[elf_shstrtab_start +elf_current_section_name_offset], elf_data[elf_shstrtab_start +elf_current_section_name_offset + 1], elf_data[elf_shstrtab_start +elf_current_section_name_offset + 2], elf_data[elf_shstrtab_start +elf_current_section_name_offset + 3], elf_data[elf_shstrtab_start + elf_current_section_name_offset + 4]}) begin
+                elf_text_start = { elf_data[elf_current_section_start + 8'h10 + 3], elf_data[elf_current_section_start + 8'h10 + 2], elf_data[elf_current_section_start + 8'h10 + 1], elf_data[elf_current_section_start + 8'h10] };
             end
-            // Assume .rodata follows right after .text for now
-            if (elf_text_start != 0) begin
-                elf_rodata_start = {elf_data[elf_sections_start+8'h28*i+16+3], elf_data[elf_sections_start+8'h28*i+16+2], elf_data[elf_sections_start+8'h28*i+16+1], elf_data[elf_sections_start+8'h28*i+16]};
-                elf_rodata_size = {elf_data[elf_sections_start+8'h28*i+20+3], elf_data[elf_sections_start+8'h28*i+20+2], elf_data[elf_sections_start+8'h28*i+20+1], elf_data[elf_sections_start+8'h28*i+20]};
+            // if (".text" != {elf_data[elf_shstrtab_start +elf_current_section_name_offset], elf_data[elf_shstrtab_start +elf_current_section_name_offset + 1], elf_data[elf_shstrtab_start +elf_current_section_name_offset + 2], elf_data[elf_shstrtab_start +elf_current_section_name_offset + 3], elf_data[elf_shstrtab_start + elf_current_section_name_offset + 4]}) begin
+            //     elf_rodata_start = { elf_data[elf_current_section_start + 8'h10 + 3], elf_data[elf_current_section_start + 8'h10 + 2], elf_data[elf_current_section_start + 8'h10 + 1], elf_data[elf_current_section_start + 8'h10] };
+            //     elf_rodata_size = { elf_data[elf_current_section_start + 8'h14 + 3], elf_data[elf_current_section_start + 8'h14 + 2], elf_data[elf_current_section_start + 8'h14 + 1], elf_data[elf_current_section_start + 8'h14] };
+            // end
+            // if (".rodata" == {elf_data[elf_shstrtab_start +elf_current_section_name_offset], elf_data[elf_shstrtab_start +elf_current_section_name_offset + 1], elf_data[elf_shstrtab_start +elf_current_section_name_offset + 2], elf_data[elf_shstrtab_start +elf_current_section_name_offset + 3], elf_data[elf_shstrtab_start + elf_current_section_name_offset + 4], elf_data[elf_shstrtab_start +elf_current_section_name_offset + 5], elf_data[elf_shstrtab_start +elf_current_section_name_offset + 6]}) begin
+            //     elf_rodata_start = { elf_data[elf_current_section_start + 8'h10 + 3], elf_data[elf_current_section_start + 8'h10 + 2], elf_data[elf_current_section_start + 8'h10 + 1], elf_data[elf_current_section_start + 8'h10] };
+            // end
+            if (elf_current_section_type == 32'h08) begin
+                elf_bss_start = { elf_data[elf_current_section_start + 8'h10 + 3], elf_data[elf_current_section_start + 8'h10 + 2], elf_data[elf_current_section_start + 8'h10 + 1], elf_data[elf_current_section_start + 8'h10] };
             end
         end
 
@@ -140,22 +164,22 @@ module main(input clk);
         for (i = 0; i < MEMORY_LEN; i = i + 1) begin
             memory[i] = 32'b0;
         end
-        for (i = 0; i < elf_text_size; i = i + 4) begin
+
+        for (i = 0; i < elf_bss_start - elf_text_start; i = i + 4) begin
             memory[i >> 2] = { elf_data[elf_text_start + i + 3], elf_data[elf_text_start + i + 2], elf_data[elf_text_start + i + 1], elf_data[elf_text_start + i] };
         end
-        for (; i < elf_text_size + elf_rodata_size; i = i + 4) begin
-            memory[i >> 2] = { elf_data[elf_rodata_start + i + 3], elf_data[elf_rodata_start + i + 2], elf_data[elf_rodata_start + i + 1], elf_data[elf_rodata_start + i] };
-        end
 
-
+        // Start from _start for newlib
+        entrypoint = 0;
         inst = memory[entrypoint >> 2];
         pc = entrypoint + 4;
 
         for (i = 0; i < 32; i = i + 1) begin
             regfile[i] = 32'b0;
         end
+        regfile[1] = TERMINATE_PROGRAM_ADDR; // ra initialization (will be used to terminate the program)
         regfile[2] = MEMORY_LEN*4-1; // sp initialization
-        regfile[3] = MEMORY_LEN*4/2-1; // gp initialization
+        regfile[3] = 0; // gp initialization
     end
 
     function [31:0] read_register(input [4:0] reg_num);
@@ -233,39 +257,31 @@ module main(input clk);
 
     task invalid_instruction;
         begin
+            $display("pc = %h | inst = %h", pc, inst);
             $display("Invalid instruction: %h", inst);
+            $finish;
         end
     endtask
 
     task mem_store;
         begin
             // $display("STORE | addr: %h | data: %h", mem_store_addr_full, mem_store_data);
-            case (mem_store_addr_full)
-                32'hFFFF0000: $write("%c", mem_store_data[7:0]);  // Print a character
-                32'hABCD0000: begin 
-                    // Exit the program
-                    $write("\n\nProgram exited with code %0d\n", mem_store_data);
-                    $finish;
-                end
-                default: begin
-                    case (mem_store_funct3)
-                        3'b000: begin
-                            case (mem_store_addr_full[1:0])
-                                2'b00: memory[(mem_store_addr_full >> 2) & (MEMORY_LEN-1)][7:0] <= mem_store_data[7:0];
-                                2'b01: memory[(mem_store_addr_full >> 2) & (MEMORY_LEN-1)][15:8] <= mem_store_data[7:0];
-                                2'b10: memory[(mem_store_addr_full >> 2) & (MEMORY_LEN-1)][23:16] <= mem_store_data[7:0];
-                                2'b11: memory[(mem_store_addr_full >> 2) & (MEMORY_LEN-1)][31:24] <= mem_store_data[7:0];
-                            endcase
-                        end
-                        3'b001: begin
-                            case (mem_store_addr_full[1:0])
-                                2'b00: memory[(mem_store_addr_full >> 2) & (MEMORY_LEN-1)][15:0] <= mem_store_data[15:0];
-                                2'b10: memory[(mem_store_addr_full >> 2) & (MEMORY_LEN-1)][31:16] <= mem_store_data[15:0];
-                            endcase
-                        end
-                        3'b010: memory[(mem_store_addr_full >> 2) & (MEMORY_LEN-1)] <= mem_store_data;
+            case (mem_store_funct3)
+                3'b000: begin
+                    case (mem_store_addr_full[1:0])
+                        2'b00: memory[(mem_store_addr_full >> 2) & (MEMORY_LEN-1)][7:0] <= mem_store_data[7:0];
+                        2'b01: memory[(mem_store_addr_full >> 2) & (MEMORY_LEN-1)][15:8] <= mem_store_data[7:0];
+                        2'b10: memory[(mem_store_addr_full >> 2) & (MEMORY_LEN-1)][23:16] <= mem_store_data[7:0];
+                        2'b11: memory[(mem_store_addr_full >> 2) & (MEMORY_LEN-1)][31:24] <= mem_store_data[7:0];
                     endcase
                 end
+                3'b001: begin
+                    case (mem_store_addr_full[1:0])
+                        2'b00: memory[(mem_store_addr_full >> 2) & (MEMORY_LEN-1)][15:0] <= mem_store_data[15:0];
+                        2'b10: memory[(mem_store_addr_full >> 2) & (MEMORY_LEN-1)][31:16] <= mem_store_data[15:0];
+                    endcase
+                end
+                3'b010: memory[(mem_store_addr_full >> 2) & (MEMORY_LEN-1)] <= mem_store_data;
             endcase
             mem_store_en <= 0;
         end
@@ -284,6 +300,39 @@ module main(input clk);
         end
     endtask
 
+    task system_call;
+        begin
+            case (read_register(17)) // call opcode is stored in a7, parameter is stored in a0..a2
+                80: begin // SYS_fstat
+                end
+                214: begin // SYS_brk
+                end
+                57: begin // SYS_close
+                end
+                93: begin // SYS_exit
+                    exit_program;
+                end
+                64: begin // SYS_write
+                    case (read_register(10))
+                        1: begin // stdout
+                            for (i = 0; i < read_register(12); i = i + 1) begin
+                                $write("%c", read_memory_byte_zeroextended(read_register(11) + i));
+                            end
+                            regfile[10] <= read_register(12); // return number of bytes written
+                        end
+                    endcase
+                end
+            endcase
+        end
+    endtask
+
+    task exit_program;
+        begin
+            $write("\n\nProgram exited with code %0d\n", read_register(10));
+            $finish;
+        end
+    endtask
+
     always @(posedge clk) begin
         // $display("Clock");        
         
@@ -291,9 +340,21 @@ module main(input clk);
         inst <= memory[pc >> 2];
         pc <= pc + 4;
 
+        // there is a skip in jump with a3 being
+        // wrong at instruction 10e4
+        // check s1
+
         // #1;
         // $display("pc = %h | inst = %h", pc, inst);
-        // $display("%h", regfile[10]);
+        // $display("s0: %h", regfile[8]);
+        // $display("s1: %h", regfile[9]);
+        // $display("s7: %h", regfile[23]);
+        // $display("a0: %h", regfile[10]);
+        // $display("a1: %h", regfile[11]);
+        // $display("a3: %h", regfile[13]);
+        // $display("ra: %h", regfile[1]);
+        // $display("sp: %h", regfile[2]);
+        // $display("2c74: %h", memory[32'h2c74 >> 2]);
 
         // We are putting these before decode and execute, since the order doesn't matter in
         // the clock cycle, but we want to be able to overwrite mem_load_en and mem_store_en if
@@ -313,6 +374,7 @@ module main(input clk);
         case(opcode)
             7'b0000011: begin
                 // LOAD (I-type)
+                // $display("Initiating load | addr: %h | register: %h", i_imm + read_register(i_rs1), i_rd);
                 case (i_funct3)
                     3'b000, // LB
                     3'b001, // LH
@@ -333,18 +395,25 @@ module main(input clk);
             7'b0100011: begin
                 // STORE (S-type)
                 // $display("Initiating store | addr: %h | data: %h", s_imm + read_register(s_rs1), read_register(s_rs2));
-                case (s_funct3)
-                    3'b000, // SB
-                    3'b001, // SH
-                    3'b010: // SW
-                        begin
-                            mem_store_addr_full <= s_imm + read_register(s_rs1);
-                            mem_store_data <= read_register(s_rs2);
-                            mem_store_funct3 <= s_funct3;
-                            mem_store_en <= 1;
-                        end
-                    default: begin 
-                        invalid_instruction;
+                case (s_imm + read_register(s_rs1))
+                    PRINT_ADDR: begin
+                        $write("%h", read_register(s_rs2));
+                    end
+                    default: begin
+                        case (s_funct3)
+                            3'b000, // SB
+                            3'b001, // SH
+                            3'b010: // SW
+                                begin
+                                    mem_store_addr_full <= s_imm + read_register(s_rs1);
+                                    mem_store_data <= read_register(s_rs2);
+                                    mem_store_funct3 <= s_funct3;
+                                    mem_store_en <= 1;
+                                end
+                            default: begin 
+                                invalid_instruction;
+                            end
+                        endcase
                     end
                 endcase
             end
@@ -354,7 +423,7 @@ module main(input clk);
             end
             7'b0010111: begin
                 // AUIPC (U-type)
-                regfile[u_rd] <= pc + u_imm;
+                regfile[u_rd] <= pc + u_imm - 4;
             end
             7'b0010011: begin
                 // Immediate ALU (I-type)
@@ -444,6 +513,9 @@ module main(input clk);
             7'b1101111: begin
                 // JAL (UJ-type)
                 // $display("JAL: Trying to go to %h, and will return to %h", pc + uj_imm, pc);
+                if ((pc-4 + uj_imm) == TERMINATE_PROGRAM_ADDR) begin
+                    exit_program;
+                end
                 regfile[uj_rd] <= pc; // This is the next address since inst would be assigned to memory[pc >> 2] in this clock cycle
                 // Reading memory in-place since it must be followed immediately
                 inst <= memory[(pc-4 + uj_imm) >> 2];
@@ -451,12 +523,23 @@ module main(input clk);
             end
             7'b1100111: begin
                 // JALR (I-type)
-                // $display("JALR: Trying to go to %h, and will return to %h", regfile[i_rs1] + i_imm, pc);
+                // $display("JALR: Trying to go to %h, and will return to %h", read_register(i_rs1) + i_imm, pc);
                 if (i_funct3 == 3'b000) begin
+                    if (((read_register(i_rs1) + i_imm) & ~32'h1) == TERMINATE_PROGRAM_ADDR) begin
+                        exit_program;
+                    end
+
                     regfile[i_rd] <= pc; // This is the next address since inst would be assigned to memory[pc >> 2] in this clock cycle
                     // Reading memory in-place since it must be followed immediately
                     inst <= memory[((read_register(i_rs1) + i_imm) & ~32'h1) >> 2];
                     pc <= ((read_register(i_rs1) + i_imm)  & ~32'h1) + 4;
+                end
+            end
+            7'b1110011: begin
+                // SYSTEM (Special type)
+                // $display("SYSCALL | %d %d %d %d", read_register(17), read_register(10), read_register(11), read_register(12));
+                if (inst == 32'h00000073) begin // ECALL
+                    system_call;
                 end
             end
             default: begin
@@ -482,7 +565,7 @@ module test;
     end
 
     initial begin
-        #1500;
+        #1000;
         // $finish;
     end
     
