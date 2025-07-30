@@ -340,10 +340,6 @@ module main(input clk);
         inst <= memory[pc >> 2];
         pc <= pc + 4;
 
-        // there is a skip in jump with a3 being
-        // wrong at instruction 10e4
-        // check s1
-
         // #1;
         // $display("pc = %h | inst = %h", pc, inst);
         // $display("s0: %h", regfile[8]);
@@ -354,12 +350,10 @@ module main(input clk);
         // $display("a3: %h", regfile[13]);
         // $display("ra: %h", regfile[1]);
         // $display("sp: %h", regfile[2]);
-        // $display("2c74: %h", memory[32'h2c74 >> 2]);
 
         // We are putting these before decode and execute, since the order doesn't matter in
         // the clock cycle, but we want to be able to overwrite mem_load_en and mem_store_en if
         // the current instruction is a load or store (otherwise, consecutive stores don't work).
-
         // Memory load
         if (mem_load_en) begin
             mem_load;
