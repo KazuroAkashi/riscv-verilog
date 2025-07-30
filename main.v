@@ -476,12 +476,12 @@ module main(input clk);
                                 regfile[r_rd] <= (read_register_extended(r_rs1, 0) * read_register_extended(r_rs2, 0)) >> 32;
                             end
                             3'b100: begin // DIV
-                                if (read_register(r_rs2) == 32'b0) regfile[r_rd] <= 32'b1;
+                                if (read_register(r_rs2) == 32'b0) regfile[r_rd] <= -1;
                                 else if (read_register(r_rs1) == (1 << 31) && read_register(r_rs2) == -1) regfile[r_rd] <= (1 << 31);
                                 else regfile[r_rd] <= $signed(read_register_extended(r_rs1, 1)) / $signed(read_register_extended(r_rs2, 1));
                             end
                             3'b101: begin // DIVU
-                                if (read_register(r_rs2) == 32'b0) regfile[r_rd] <= 32'b1;
+                                if (read_register(r_rs2) == 32'b0) regfile[r_rd] <= -1;
                                 else regfile[r_rd] <= read_register_extended(r_rs1, 0) / read_register_extended(r_rs2, 0);
                             end
                             3'b110: begin // REM
