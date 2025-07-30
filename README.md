@@ -10,7 +10,7 @@ This is a RISC-V CPU core implementation using Verilog HDL, implementing the R32
 
 ## Testing
 
-`iverilog` has been used to simulate the processor. Makefile contains necessary compiling steps for running `test.c`.
+`iverilog` has been used to simulate the processor. Makefile contains necessary compiling steps for running `test.c`. Make sure `riscv64-elf-gcc`, `riscv64-elf-objdump` and `riscv64-elf-newlib` are installed.
 
 Run
 
