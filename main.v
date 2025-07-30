@@ -9,8 +9,14 @@ module main(input clk);
 
     parameter PRINT_ADDR = 32'hFFFFFF00;
 
+    parameter STACK_END = MEMORY_LEN*4 - 1;
+
+    parameter HEAP_START = STACK_END - 16*1024;
+
     reg [31:0] memory [MEMORY_LEN-1:0];
     reg [31:0] regfile [31:0];
+
+    reg [31:0] heap_break = HEAP_START;
 
     reg [31:0] pc = 4; // Start at 4 because inst gets updated in the clock 
     reg [31:0] inst;
@@ -205,6 +211,15 @@ module main(input clk);
         end
     endfunction
 
+    function [63:0] read_register_extended(input [4:0] reg_num, input sign_extended);
+        reg [31:0] register;
+        begin
+            register = read_register(reg_num);
+            if (sign_extended) read_register_extended = { {32{register[31]}}, register };
+            else read_register_extended = { 32'b0, register };
+        end
+    endfunction
+
     function [7:0] read_memory_byte(input [31:0] addr);
         begin
             read_memory_byte = (memory[(addr >> 2) & (MEMORY_LEN-1)] >> (addr[1:0] * 8)) & 8'hFF;
@@ -306,6 +321,9 @@ module main(input clk);
                 80: begin // SYS_fstat
                 end
                 214: begin // SYS_brk
+                    // TODO: Heap overflow
+                    if (read_register(10) == 0) regfile[10] <= heap_break;
+                    else heap_break <= read_register(10);
                 end
                 57: begin // SYS_close
                 end
@@ -342,6 +360,7 @@ module main(input clk);
 
         // #1;
         // $display("pc = %h | inst = %h", pc, inst);
+        // $display("%h", memory[16'h040c >> 2]);
         // $display("s0: %h", regfile[8]);
         // $display("s1: %h", regfile[9]);
         // $display("s7: %h", regfile[23]);
@@ -441,23 +460,61 @@ module main(input clk);
             end
             7'b0110011: begin
                 // ALU (R-type)
-                case (r_funct3)
-                    3'b000: begin
-                        case (r_funct7)
-                            7'b0000000: regfile[r_rd] <= read_register(r_rs1) + read_register(r_rs2); // ADD
-                            7'b0100000: regfile[r_rd] <= read_register(r_rs1) - read_register(r_rs2); // SUB
+                case (r_funct7)
+                    7'b0000001: begin // MULDIV
+                        case (r_funct3)
+                            3'b000: begin // MUL
+                                regfile[r_rd] <= (read_register_extended(r_rs1, 0) * read_register_extended(r_rs2, 0));
+                            end
+                            3'b001: begin // MULH
+                                regfile[r_rd] <= ($signed(read_register_extended(r_rs1, 1)) * $signed(read_register_extended(r_rs2, 1))) >> 32;
+                            end
+                            3'b010: begin // MULHSU
+                                regfile[r_rd] <= ($signed(read_register_extended(r_rs1, 1)) * read_register_extended(r_rs2, 0)) >> 32;
+                            end
+                            3'b011: begin // MULHU
+                                regfile[r_rd] <= (read_register_extended(r_rs1, 0) * read_register_extended(r_rs2, 0)) >> 32;
+                            end
+                            3'b100: begin // DIV
+                                if (read_register(r_rs2) == 32'b0) regfile[r_rd] <= 32'b1;
+                                else if (read_register(r_rs1) == (1 << 31) && read_register(r_rs2) == -1) regfile[r_rd] <= (1 << 31);
+                                else regfile[r_rd] <= $signed(read_register_extended(r_rs1, 1)) / $signed(read_register_extended(r_rs2, 1));
+                            end
+                            3'b101: begin // DIVU
+                                if (read_register(r_rs2) == 32'b0) regfile[r_rd] <= 32'b1;
+                                else regfile[r_rd] <= read_register_extended(r_rs1, 0) / read_register_extended(r_rs2, 0);
+                            end
+                            3'b110: begin // REM
+                                if (read_register(r_rs2) == 32'b0) regfile[r_rd] <= read_register(r_rs1);
+                                else if (read_register(r_rs1) == (1 << 31) && read_register(r_rs2) == -1) regfile[r_rd] <= 0;
+                                else regfile[r_rd] <= $signed(read_register_extended(r_rs1, 1)) % $signed(read_register_extended (r_rs2, 1));
+                            end
+                            3'b111: begin // REMU
+                                if (read_register(r_rs2) == 32'b0) regfile[r_rd] <= read_register(r_rs1);
+                                else regfile[r_rd] <= read_register_extended(r_rs1, 0) % read_register_extended(r_rs2, 0);
+                            end
                         endcase
                     end
-                    3'b010: regfile[r_rd] <= $signed(read_register(r_rs1)) < $signed(read_register(r_rs2)) ? 32'd1 : 32'd0; // SLT
-                    3'b011: regfile[r_rd] <= read_register(r_rs1) < read_register(r_rs2) ? 32'd1 : 32'd0; // SLTU
-                    3'b100: regfile[r_rd] <= read_register(r_rs1) ^ read_register(r_rs2); // XOR
-                    3'b110: regfile[r_rd] <= read_register(r_rs1) | read_register(r_rs2); // OR
-                    3'b111: regfile[r_rd] <= read_register(r_rs1) & read_register(r_rs2); // AND
-                    3'b001: regfile[r_rd] <= read_register(r_rs1) << (read_register(r_rs2) & 5'b11111); // SLL
-                    3'b101: begin 
-                        case (r_funct7)
-                            7'b0000000: regfile[r_rd] <= read_register(r_rs1) >> (read_register(r_rs2) & 5'b11111); // SRL
-                            7'b0100000: regfile[r_rd] <= $signed(read_register(r_rs1)) >>> (read_register(r_rs2) & 5'b11111); // SRA
+                    default: begin
+                        case (r_funct3)
+                            3'b000: begin
+                                case (r_funct7)
+                                    7'b0000000: regfile[r_rd] <= read_register(r_rs1) + read_register(r_rs2); // ADD
+                                    7'b0100000: regfile[r_rd] <= read_register(r_rs1) - read_register(r_rs2); // SUB
+                                endcase
+                            end
+                            3'b010: regfile[r_rd] <= $signed(read_register(r_rs1)) < $signed(read_register(r_rs2)) ? 32'd1 : 32'd0; // SLT
+                            3'b011: regfile[r_rd] <= read_register(r_rs1) < read_register(r_rs2) ? 32'd1 : 32'd0; // SLTU
+                            3'b100: regfile[r_rd] <= read_register(r_rs1) ^ read_register(r_rs2); // XOR
+                            3'b110: regfile[r_rd] <= read_register(r_rs1) | read_register(r_rs2); // OR
+                            3'b111: regfile[r_rd] <= read_register(r_rs1) & read_register(r_rs2); // AND
+                            3'b001: regfile[r_rd] <= read_register(r_rs1) << (read_register(r_rs2) & 5'b11111); // SLL
+                            3'b101: begin 
+                                case (r_funct7)
+                                    7'b0000000: regfile[r_rd] <= read_register(r_rs1) >> (read_register(r_rs2) & 5'b11111); // SRL
+                                    7'b0100000: regfile[r_rd] <= $signed(read_register(r_rs1)) >>> (read_register(r_rs2) & 5'b11111); // SRA
+                                endcase
+                            end
                         endcase
                     end
                 endcase

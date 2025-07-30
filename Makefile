@@ -2,7 +2,7 @@ CC = riscv64-elf-gcc
 OBJDUMP = riscv64-elf-objdump
 OBJCOPY = riscv64-elf-objcopy
 
-CFLAGS = -march=rv32i -mabi=ilp32 -T link.ld
+CFLAGS = -march=rv32im -mabi=ilp32 -T link.ld
 
 # MEMORY_SIZE = 4096
 ELF_SIZE = 1048576 # 1 MB (Must match with the definiton inside main.v)
